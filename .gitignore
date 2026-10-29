@@ -4,6 +4,8 @@ WEEKLY_TRACKER.md
 templates/
 04_published/
 01_reading_vault/
+02_experiments/README.md
+03_drafts/README.md
 *.pyc
 __pycache__/
 .vscode/
