@@ -1,0 +1,10 @@
+# Internal workspace files (mentor & tracking)
+AGENTS.md
+WEEKLY_TRACKER.md
+templates/
+04_published/
+01_reading_vault/
+*.pyc
+__pycache__/
+.vscode/
+.idea/
