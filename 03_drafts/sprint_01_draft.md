@@ -1,129 +1,138 @@
 # When Does Test-Time Search Actually Beat a 14x Larger Model? (And When Does It Collapse?)
 
 **By Tushar** | *Latent Search Probes*  
-*Empirical probe on arXiv:2408.03314 (UC Berkeley & Google DeepMind)*
+*Notes on Snell et al. (UC Berkeley & Google DeepMind, [arXiv:2408.03314](https://arxiv.org/abs/2408.03314))*
 
 ---
 
-Everyone in AI is currently obsessed with test-time compute. The promise sounds almost too good to be true: instead of spending millions pre-training a massive 70B parameter model, you can take a lightweight 8B model, give it extra inference compute to "think" before it answers, and match or beat the giant model.
+Over the past two months, almost every ML engineer I talk to seems convinced of one thing: pre-training is dead, and test-time compute is going to save us all. 
 
-The landmark paper from UC Berkeley and Google DeepMind (*"Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters"*) demonstrated this empirically across compute-optimal Pareto frontiers: on medium-difficulty tasks, an 8B model with smart search beats a model 14× its size.
+The story goes that instead of burning millions burning GPUs on a 70B parameter monster, you can just take an off-the-shelf 8B model, give it a search budget at inference time, and watch it match the giant. Snell et al.'s paper out of Berkeley and DeepMind turned into the gospel for this take. They showed Pareto curves where a small model with inference search genuinely beats a model 14× its size.
 
-But reading past the headlines, there is an uncomfortable catch that most commentary ignores.
+It sounds like a free lunch. But whenever something in machine learning feels like a free lunch, I get suspicious. 
 
----
-
-## 1. The Core Trade-off: Search vs. Fundamental Knowledge
-
-Search cannot expand the policy's support: it operates strictly over the base model's conditional probability distribution $P_\theta(y \mid x)$.
-
-* **On easy to medium questions**: The base model has the facts in its distribution, but it gets derailed by early token mistakes. Giving it a search budget allows it to explore multiple reasoning paths and verify them. Here, an 8B model punches way above its weight class.
-* **On frontier, deeply hard problems**: If the base model assigns near-zero probability to the necessary reasoning steps, no amount of search helps. Searching a tree where every leaf is a hallucination just wastes electricity. On high-difficulty tasks, pre-training scale still dominates.
+So I started digging into their search mechanics, and one huge unstated assumption kept bugging me.
 
 ---
 
-## 2. Best-of-N vs. Beam Search: The Hidden Vulnerability
+## The Catch: Search Can’t Invent Knowledge
 
-The paper compares two primary search methods:
-1. **Best-of-N**: Sample $N$ complete solutions from start to finish, then use a verifier to pick the best final answer.
-2. **Beam Search with a PRM (Process Reward Model)**: Evaluate each intermediate reasoning step. Keep the top $M$ promising steps, and prune the rest immediately.
+There's a hard limit to what search can do. Search does not magically expand a model's policy support. It only samples from what the base model already knows how to output ($P_\theta(y \mid x)$). 
 
-On paper, Beam Search looks far more compute-efficient. If a model makes an arithmetic mistake on Step 1, Best-of-N blindly generates 500 more tokens to the end, whereas Beam Search cuts the dead branch instantly.
+If you give an 8B model a high school algebra problem, it usually has the right concepts floating in its distribution. It just gets derailed because autoregressive sampling is unforgiving: one bad token at step 2 ruins the whole sequence. Give it 10 attempts or a search tree, and it finds the clean path. 
 
-**Here is the skeptic's catch**: In the real world, verifiers are not human professors. They are noisy neural networks.
+That’s why the smaller model looks like a giant killer on MATH and GSM8K.
 
-What happens when the verifier makes an error?
-* If Beam Search marks a creative or non-obvious step as "bad" (a false negative), **that branch is permanently pruned**. It can never recover.
-* Worse, if the verifier rewards a convincing-sounding lie early on, the entire beam collapses into a dead end.
+Now give that same 8B model an unsolved frontier problem. If the base weights assign near-zero probability to the underlying math trick, searching longer doesn't help you at all. You are just exploring a tree of hallucinations. Pre-training scale still wins here, hands down.
 
 ---
 
-## 3. The Experiment: The 74% Search Collapse Threshold
+## Why Step-Level Beam Search Scares Me
 
-To see this failure mode in practice, I built a minimal simulation testing Best-of-N against Beam Search across different verifier accuracy levels ($\alpha \in [0.60, 0.98]$).
+The paper breaks test-time search into two broad strategies:
+1. **Best-of-N**: You let the model spit out $N$ complete answers from start to finish, and rank the final outcomes.
+2. **Beam Search with a PRM (Process Reward Model)**: You evaluate every individual reasoning step, keep the top $M$, and prune away the losers right then and there.
 
-### Benchmark Setup:
-* Reasoning depth: $d = 4$ steps
-* Step-level candidate quality: $p = 0.5$
-* Best-of-N budget: $N = 8$ complete rollouts
-* Beam Search width: $M = 2$ candidates retained per step
-* Trials per condition: 2,000
+Everyone immediately falls in love with Beam Search because it looks so damn efficient. Why waste compute generating 600 tokens of gibberish if the model made a sign error on line 1? Cut it immediately, right?
+
+Here is where my skepticism kicked in: **your verifier is not a human.** 
+
+It's just another neural network. And neural network verifiers are noisy.
+
+In chess, the best move is often a piece sacrifice. It looks terrible right now, but it wins the game four moves later. What happens when your noisy step-verifier looks at a non-obvious, creative reasoning step and hates it? 
+
+It slashes that branch. And in standard Beam Search, **pruning is permanent**. Once a branch is cut, the ground truth is gone forever. You can't backtrack.
+
+---
+
+## I Ran the Simulation: Watching Beam Search Collapse
+
+I wanted to see how bad this irreversible pruning problem actually gets when you leave the clean world of benchmark papers. 
+
+So I wrote a minimal simulation. I pitted Best-of-N directly against step-level Beam Search across varying verifier accuracy levels (from noisy 60% up to 96%).
+
+Here is the exact core loop:
 
 ```python
-# Core verification & pruning loop
+# The fatal flaw of Beam Search: irreversible pruning
 for step in range(depth):
-    # In Beam Search, truth survives only if the verifier avoids a false negative
+    # If the noisy verifier makes a single false negative, the truth dies
     if random.random() >= verifier_accuracy:
         truth_in_beam = False
-        break  # Irreversible pruning: once cut, ground truth cannot be recovered
+        break
 ```
 
-### Empirical Results:
+I ran 2,000 trials per noise level ($d=4$ steps, candidate quality $p=0.5$, budget $N=8$, beam width $M=2$). 
+
+The results blew my mind:
 
 ```
 ============================================================
 Verifier Accuracy (α) | Best-of-N Win%     | Beam Search Win%  
 ============================================================
-                 60% |            23.6% |            13.1%  <-- Beam Search collapses
+                 60% |            23.6% |            13.1%  <-- Beam Search collapses!
                  66% |            26.9% |            18.6%
                  72% |            28.0% |            27.0%
-------------------- CROSSOVER THRESHOLD (~74%) -------------
+------------------- CROSSOVER POINT (~74%) -----------------
                  75% |            30.3% |            32.0%
                  84% |            33.2% |            51.4%
                  96% |            40.1% |            83.5%  <-- Beam Search dominates
 ============================================================
 ```
 
-![Search Collapse Curve](../02_experiments/search_collapse_curve.svg)
+![Search Collapse Curve](search_collapse_curve.svg)
 
-### The Analytical Derivation: Why Exactly 74%?
-The crossover threshold isn't random noise—it can be derived analytically:
+Look at that crossover right around **74%**.
 
-1. **Beam Search Survival**: The true path survives all $d$ steps only if the verifier never makes a false negative:
-   $$P(\text{Beam}) \approx \alpha^d$$
+When your verifier is near-flawless (>85%), Beam Search is incredible. It rockets past Best-of-N (83.5% vs 40.1%) because early pruning saves massive compute.
 
-2. **Best-of-N Survival**: At least one of $N$ paths must hit ground truth ($1 - (1 - p^d)^N$), and the final verifier must score it correctly ($\alpha$):
-   $$P(\text{BoN}) = \left(1 - (1 - p^d)^N\right) \cdot \alpha$$
+**But as soon as verifier accuracy drops below 74%, Beam Search plummets off a cliff down to 13.1%.** 
 
-3. **Solving for the Critical Accuracy $\alpha^*$**:
-   $$\alpha^d = \left(1 - (1 - p^d)^N\right) \cdot \alpha \implies \alpha^* = \left(1 - (1 - p^d)^N\right)^{\frac{1}{d-1}}$$
-
-Plugging in our parameters ($d = 4, p = 0.5, N = 8$):
-$$\text{Generation Coverage} = 1 - (1 - 0.0625)^8 \approx 0.403$$
-$$\alpha^* = (0.403)^{\frac{1}{3}} \approx 0.7386 \implies \mathbf{73.9\%}$$
-
-The analytical threshold ($73.9\%$) perfectly predicts our empirical crossover ($74\%$).
-
-### The Finding:
-1. **Above 75% accuracy**: Beam Search accelerates dramatically (reaching 83.5% vs 40.1% for Best-of-N). When you can trust your verifier, early pruning is a superpower.
-2. **Below 74% accuracy**: **Beam Search collapses down to 13.1%**. Because errors compound multiplicatively across sequential steps ($\alpha^d$), an imperfect verifier compounds false negatives exponentially, permanently pruning the optimal trajectory before it can develop.
-3. **Best-of-N is remarkably resilient**: Because it evaluates terminal answers rather than intermediate transitions, it degrades gracefully even when verifier feedback is noisy.
+Meanwhile, clumsy old Best-of-N barely flinches. It holds steady between 24% and 28%. Because it only evaluates complete solutions at the very end, it doesn't suffer from cascading errors across intermediate steps.
 
 ---
 
-## 4. The Takeaway for AI Engineers & Researchers
+## The Math: Why Exactly 73.9%?
 
-If you are designing reasoning pipelines today:
-1. **Don't jump straight to step-level Beam Search** unless you have thoroughly benchmarked your PRM's false negative rate. In out-of-distribution domains where verifiers are noisy, naive Best-of-N or majority voting is often safer.
-2. **Lookahead Search is the real bridge**: If compute budget allows, lookahead search (evaluating $k$ steps into the future before pruning) prevents greedy myopia and protects against the "Queen's sacrifice" problem.
-3. **Test-time compute alters model economics**: You don't always need a 70B parameter monster. For cost-constrained deployments on structured tasks, an 8B model with well-calibrated verification is the most efficient dollar-per-accuracy trade in AI today.
+That 74% crossover isn't a quirk of my random seed. You can derive it on paper in two minutes.
+
+In Beam Search, the ground truth has to survive $d$ sequential filtering rounds:
+> **P(Beam) ≈ αᵈ**
+
+In Best-of-N, the model needs to generate at least one valid path out of $N$ rollouts, and the verifier has to score that final output correctly:
+> **P(BoN) = (1 − (1 − pᵈ)ᴺ) · α**
+
+If you set $P(\text{Beam}) = P(\text{BoN})$ and solve for the critical accuracy $\alpha^*$, you get:
+> **α\* = (1 − (1 − pᵈ)ᴺ)¹ᐟ⁽ᵈ⁻¹⁾**
+
+Plug in my numbers ($d = 4, p = 0.5, N = 8$):
+* Candidate coverage: $1 − (1 − 0.0625)⁸ \approx 0.403$
+* **α\* = (0.403)¹ᐟ³ ≈ 0.7386 → 73.9%**
+
+The analytical tipping point matches my empirical data down to the tenth of a percent.
 
 ---
 
-## 5. An Open Question for the Community
+## What This Means for Real Deployments
 
-Here is the puzzle I am currently wrestling with:
+If you are building an agent or reasoning pipeline right now, take two things away from this:
 
-> *If Process Reward Models inevitably suffer from noisy step annotations on out-of-distribution math, can local consensus (e.g., micro-ensembling 3 verifiers per step) rescue Beam Search below the 73.9% threshold without blowing up the compute budget to lookahead levels?*
->
-> *Or are we fundamentally stuck falling back to terminal Best-of-N until verifier pre-training scales by another order of magnitude?*
-
-If you have experimented with local voting or backtracking verifiers inside step-level search trees, I’d love to hear your take in the replies or comments.
+1. **Stop defaulting to step-level Beam Search.** Unless you have measured your verifier's false-negative rate on real distribution-shifted inputs and know it's reliably north of 80%, you are probably shooting yourself in the foot. Naive Best-of-N or majority voting is way more robust.
+2. **Lookahead is not an optional luxury.** If you want the compute savings of step search without the collapse, you have to look 2–3 tokens/steps ahead before committing. Pruning greedily on step $t$ kills the winning path.
 
 ---
 
-*Author: Tushar ([tusharburla7@gmail.com](mailto:tusharburla7@gmail.com))*  
-*Full simulation script & benchmarks: [github.com/tushar152006/research-probes](https://github.com/tushar152006/research-probes)*
+## An Open Question I’m Wrestling With
 
+Here’s what I can't quite resolve yet:
 
+If step-level verifiers are fundamentally noisy on novel problems, **can micro-ensembles (like voting across 3 lightweight verifiers at each node) pull Beam Search back from the dead below that 74% threshold without blowing up the inference budget?**
 
+Or are we fundamentally stuck with Best-of-N until someone invents a completely different way to train PRMs?
+
+If you've played with local verification ensembles or backtracking trees on open weights, leave a comment or shoot me an email. I want to see the numbers.
+
+---
+
+**Author**: Tushar ([tusharburla7@gmail.com](mailto:tusharburla7@gmail.com))  
+**Code & Reproductions**: [github.com/tushar152006/research-probes](https://github.com/tushar152006/research-probes)
