@@ -1,6 +1,6 @@
 # When Does Test-Time Search Actually Beat a 14x Larger Model? (And When Does It Collapse?)
 
-**By Independent Research Lab | Test-Time Verification Series**  
+**By Tushar** | *Latent Search Probes*  
 *Empirical probe on arXiv:2408.03314 (UC Berkeley & Google DeepMind)*
 
 ---
