@@ -1,8 +1,7 @@
 # When Does Test-Time Search Actually Beat a 14x Larger Model? (And When Does It Collapse?)
 
-**By Tushar**  
-*Empirical probe on arXiv:2408.03314 (UC Berkeley & Google DeepMind)*  
-*GitHub: [github.com/tushar152006/research-probes](https://github.com/tushar152006/research-probes)*
+**By Independent Research Lab | Test-Time Verification Series**  
+*Empirical probe on arXiv:2408.03314 (UC Berkeley & Google DeepMind)*
 
 ---
 
@@ -123,7 +122,8 @@ If you have experimented with local voting or backtracking verifiers inside step
 
 ---
 
-*Full simulation script: `02_experiments/sprint_01_search_collapse.py`*
+*Author: Tushar ([tusharburla7@gmail.com](mailto:tusharburla7@gmail.com))*  
+*Full simulation script & benchmarks: [github.com/tushar152006/research-probes](https://github.com/tushar152006/research-probes)*
 
 
 
