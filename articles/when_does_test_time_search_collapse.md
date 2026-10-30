@@ -70,7 +70,7 @@ Verifier Accuracy (α) | Best-of-N Win%     | Beam Search Win%
 ============================================================
 ```
 
-![Search Collapse Curve](search_collapse_curve.svg)
+![Search Collapse Curve](../experiments/search_collapse_curve.svg)
 
 At first, Best-of-N held a steady, gradual increase all the way through. 
 

@@ -65,7 +65,7 @@ def print_table(accuracies, bon, beam):
         print(f"{a*100:>17.0f}% | {bo*100:>15.1f}% | {be*100:>15.1f}%")
     print("=" * 60)
 
-def generate_svg(accuracies, bon, beam, filename="02_experiments/search_collapse_curve.svg"):
+def generate_svg(accuracies, bon, beam, filename="experiments/search_collapse_curve.svg"):
     width, height = 700, 420
     padding = 60
     
